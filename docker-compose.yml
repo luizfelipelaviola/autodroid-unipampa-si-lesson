@@ -1,0 +1,126 @@
+services:
+  autodroid_api_postgres:
+    container_name: autodroid_api_postgres
+    image: postgres:14
+    environment:
+      - POSTGRES_PASSWORD=docker
+      - POSTGRES_DB=autodroid
+      - PGDATA=/var/lib/postgresql/data/pgdata
+    restart: always
+    networks:
+      - malware_datalab_private
+
+  autodroid_api_redis:
+    container_name: autodroid_api_redis
+    image: redis:alpine
+    restart: always
+    networks:
+      - malware_datalab_private
+
+  autodroid_api_mongo:
+    container_name: autodroid_api_mongo
+    image: mongo:6
+    restart: always
+    networks:
+      - malware_datalab_private
+
+  autodroid_api_gateway:
+    container_name: autodroid_api_gateway
+    image: malwaredatalab/autodroid-api:latest
+    build:
+      context: .
+      dockerfile: Dockerfile
+    environment:
+      # General
+      - APP_URL=http://localhost:3333
+      - APP_PORT=3333
+      - NODE_ENV=development
+      - DEFAULT_LANGUAGE=en
+      - TZ=UTC
+      - DEBUG=false
+
+      # Cors
+      - CORS_ALLOWED_FROM=http://localhost:3000,*
+
+      # Database
+      - DATABASE_URL=postgresql://postgres:docker@autodroid_api_postgres:5432/autodroid?schema=public
+      - DATABASE_LOGGER_ENABLED=false
+
+      # Non-relational database
+      - NON_RELATIONAL_DATABASE_URL=mongodb://autodroid_api_mongo:27017/autodroid
+      - NON_RELATIONAL_DATABASE_LOGGER_ENABLED=false
+
+      # Redis
+      - REDIS_HOST=autodroid_api_redis
+      - REDIS_PORT=6379
+      - REDIS_USER=
+      - REDIS_PASS=
+      - REDIS_DB=1
+
+      # Providers
+      - FIREBASE_AUTHENTICATION_PROVIDER_PROJECT_ID=
+      - FIREBASE_AUTHENTICATION_PROVIDER_CLIENT_EMAIL=
+      - FIREBASE_AUTHENTICATION_PROVIDER_PRIVATE_KEY=
+
+      - GOOGLE_STORAGE_PROVIDER_PROJECT_ID=
+      - GOOGLE_STORAGE_PROVIDER_CLIENT_EMAIL=
+      - GOOGLE_STORAGE_PROVIDER_PRIVATE_KEY=
+      - GOOGLE_STORAGE_PROVIDER_BUCKET_NAME=
+
+      # Feature
+      - SENTRY_DSN=
+
+      - ADMIN_EMAILS=luiz@laviola.dev
+
+      - JOBS_ENABLED=true
+
+      - STORAGE_PROVIDER_PUBLIC_READ_URL_EXPIRATION=1h
+      - STORAGE_PROVIDER_PUBLIC_WRITE_URL_EXPIRATION=5m
+
+      - WORKER_REFRESH_TOKEN_SECRET=your-refresh-secret-key
+      - WORKER_REFRESH_TOKEN_EXPIRATION=30d
+      - WORKER_ACCESS_TOKEN_SECRET=your-access-secret-key
+      - WORKER_ACCESS_TOKEN_EXPIRATION=1h
+
+      - PROCESSING_DEFAULT_KEEP_UNTIL=30d
+      - PROCESSING_ALLOWED_KEEP_UNTIL_EXTEND=30d
+    ports:
+      - 3333:3333
+    command: ./wait-for.sh autodroid_api_postgres:5432 -q -- ./wait-for.sh autodroid_api_mongo:27017 -q -- ./wait-for.sh autodroid_api_redis:6379 -q -- sh -c "yarn run-s prisma:generate prisma:prod start:prod"
+    depends_on:
+      - autodroid_api_postgres
+      - autodroid_api_mongo
+      - autodroid_api_redis
+    healthcheck:
+      test: wget --spider -q http://autodroid_api_gateway:3333/health/readiness || exit 1
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 20s
+    restart: always
+    networks:
+      - malware_datalab_private
+      - malware_datalab_public
+
+  malware_datalab_frontend:
+    container_name: malware_datalab_frontend
+    image: malwaredatalab/malware-datalab-frontend:latest
+    ports:
+      - 80:80
+    healthcheck:
+      test: wget --spider -q http://malware_datalab_frontend:80
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 10s
+    restart: always
+    depends_on:
+      - autodroid_api_gateway
+    networks:
+      - malware_datalab_public
+
+networks:
+  malware_datalab_private:
+    name: malware_datalab_private
+  malware_datalab_public:
+    name: malware_datalab_public
